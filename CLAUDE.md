@@ -8,7 +8,7 @@ output behavior.
 
 - `main.go` — CLI entry point (cobra). Root command + `pr` subcommand share the same handler; bare `gh statusline` runs `pr`.
 - `internal/pr/` — PR state struct and GraphQL fetcher. Uses go-gh's `gh.Exec` to call `gh api graphql`; auth is inherited from `gh`.
-- `internal/render/` — ANSI color helpers, `Mode` (color/hyperlink gating from TTY / `NO_COLOR`), template engine, and pre-rendered helpers (`ci`, `midIndicator`, `prLink`, `authorTag`, `labelTags`, `ciGroup`).
+- `internal/render/` — ANSI color helpers, `Mode` (color/hyperlink gating via flags + `NO_COLOR` env var, but **not** TTY detection — statusline consumers capture stdout yet still expect ANSI escapes), template engine, and pre-rendered helpers (`ci`, `midIndicator`, `prLink`, `authorTag`, `labelTags`, `ciGroup`).
 - `internal/cache/` — Tiny file-based output cache at `$TMPDIR/gh-statusline/`, keyed by SHA256 of the current working directory.
 
 ## Key design decisions
@@ -23,7 +23,6 @@ output behavior.
 
 - `cli/go-gh/v2` — `gh.Exec` for the GraphQL call, `repository.Current()` for owner/repo
 - `spf13/cobra` — CLI structure
-- `golang.org/x/term` — TTY detection for color/hyperlink gating
 
 Auth is inherited from `gh` automatically.
 
