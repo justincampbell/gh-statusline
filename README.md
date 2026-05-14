@@ -21,10 +21,13 @@ gh extension install justincampbell/gh-statusline
 ```
 gh statusline [flags]
 gh statusline pr [flags]
+gh statusline fields [flags]
 ```
 
-Both forms do the same thing. Bare `gh statusline` is shorthand for the `pr`
-subcommand, which prints the GitHub PR for the current branch.
+Bare `gh statusline` is shorthand for the `pr` subcommand, which prints the
+GitHub PR for the current branch. The `fields` subcommand prints every
+template variable alongside its current value — useful for designing custom
+`--template` strings.
 
 ### Flags
 
@@ -32,6 +35,7 @@ subcommand, which prints the GitHub PR for the current branch.
 |------|---------|-------------|
 | `--template <go-template>` | (built-in) | Custom Go template for output |
 | `--cache <duration>` | `30s` | TTL for the file-based output cache (`0` disables) |
+| `--timeout <duration>` | `3s` | Deadline for the GraphQL request before falling back to stale cache (`0` disables) |
 | `--no-color` | `false` | Strip ANSI colors (also honors the `NO_COLOR` env var) |
 | `--no-hyperlinks` | `false` | Strip OSC 8 hyperlinks |
 
@@ -98,12 +102,12 @@ apply colors and OSC 8 hyperlinks the way the default template does.
 | Helper | Output |
 |--------|--------|
 | `.ci` | Colored `✓` / `✗` / `●` / empty |
-| `.midIndicator` | Colored `!` (conflict) or `»` (auto-merge) or empty |
+| `.mergeIndicator` | Colored `!` (conflict) or `»` (auto-merge) or empty |
 | `.prLink` | `#42` colored by review decision, wrapped in an OSC 8 hyperlink |
 | `.commentIndicator` | Cyan unresolved-comments count, or empty |
 | `.authorTag` | `@author`, magenta when it's not you, dim when it is |
 | `.labelTags` | Space-joined, hex-colored label names |
-| `.ciGroup` | `.ci` + `.midIndicator` + `.prLink` with the spacing the default template uses |
+| `.ciGroup` | `.ci` + `.mergeIndicator` + `.prLink` with the spacing the default template uses |
 
 ### Template functions
 
@@ -118,14 +122,27 @@ apply colors and OSC 8 hyperlinks the way the default template does.
 {{join " " .commentIndicator .ciGroup .authorTag .labelTags}}
 ```
 
+### Inspecting field values
+
+```
+$ gh statusline fields
+ci                ✓
+mergeIndicator    
+prLink            #42
+commentIndicator  2
+authorTag         @justin
+labelTags         bug
+ciGroup           ✓ #42
+```
+
 ## Output
 
 When the current branch has no PR, output is a single empty line and the exit
 code is `0` — a statusline must never break the prompt.
 
-On a GitHub API failure (network, rate limit, transient error), the last
-cached output is reprinted regardless of its age. If no cached value exists,
-output is empty and the exit code is still `0`.
+On a GitHub API failure (network, rate limit, transient error, or hitting
+`--timeout`), the last cached output is reprinted regardless of its age. If no
+cached value exists, output is empty and the exit code is still `0`.
 
 The cache lives at `$TMPDIR/gh-statusline/pr-<sha>.json`, keyed by the current
 working directory.

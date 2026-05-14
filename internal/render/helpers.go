@@ -21,9 +21,9 @@ func (m Mode) CI(status string) string {
 	}
 }
 
-// MidIndicator returns the single-character indicator between CI and PR
-// number. Conflict (!) wins over auto-merge (»).
-func (m Mode) MidIndicator(s *pr.State) string {
+// MergeIndicator returns a single-character mergeability hint: "!" for a
+// conflict (wins over auto-merge), "»" for auto-merge queued, otherwise "".
+func (m Mode) MergeIndicator(s *pr.State) string {
 	if s == nil {
 		return ""
 	}

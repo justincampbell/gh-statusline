@@ -81,6 +81,86 @@ func TestRenderCustomTemplate(t *testing.T) {
 	}
 }
 
+func TestFieldsPopulated(t *testing.T) {
+	s := &pr.State{
+		Number:             42,
+		Title:              "Fix login redirect",
+		URL:                "https://github.com/o/r/pull/42",
+		State:              "OPEN",
+		IsDraft:            false,
+		Mergeable:          "MERGEABLE",
+		ReviewDecision:     "APPROVED",
+		AutoMerge:          true,
+		Author:             "alice",
+		Viewer:             "bob",
+		UnresolvedComments: 2,
+		CIStatus:           "passed",
+		Labels:             []pr.Label{{Name: "bug", Color: "d73a4a"}, {Name: "p1", Color: "0075ca"}},
+	}
+	got := Fields(s, plain())
+
+	want := map[string]string{
+		"number":             "42",
+		"title":              "Fix login redirect",
+		"url":                "https://github.com/o/r/pull/42",
+		"state":              "OPEN",
+		"isDraft":            "false",
+		"mergeable":          "MERGEABLE",
+		"reviewDecision":     "APPROVED",
+		"autoMerge":          "true",
+		"author":             "alice",
+		"labels":             "[bug p1]",
+		"unresolvedComments": "2",
+		"ciStatus":           "passed",
+		"ci":                 "✓",
+		"mergeIndicator":     "»",
+		"prLink":             "#42",
+		"commentIndicator":   "2",
+		"authorTag":          "@alice",
+		"labelTags":          "bug p1",
+		"ciGroup":            "✓»#42",
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("got %d fields, want %d", len(got), len(want))
+	}
+	for _, f := range got {
+		w, ok := want[f.Name]
+		if !ok {
+			t.Errorf("unexpected field %q", f.Name)
+			continue
+		}
+		if f.Value != w {
+			t.Errorf("field %q: got %q, want %q", f.Name, f.Value, w)
+		}
+	}
+
+	// Categories are split: raw fields first, helpers second.
+	var seenHelper bool
+	for _, f := range got {
+		if f.Category == "helper" {
+			seenHelper = true
+		} else if seenHelper {
+			t.Errorf("raw field %q appeared after a helper — order should be raw then helper", f.Name)
+		}
+	}
+}
+
+func TestFieldsEmptyState(t *testing.T) {
+	got := Fields(nil, plain())
+	if len(got) == 0 {
+		t.Fatal("expected fields even for nil state")
+	}
+	for _, f := range got {
+		if f.Name == "number" && f.Value != "0" {
+			t.Errorf("expected number=0 for nil state, got %q", f.Value)
+		}
+		if f.Name == "labels" && f.Value != "[]" {
+			t.Errorf("expected labels=[] for nil state, got %q", f.Value)
+		}
+	}
+}
+
 func TestRenderInvalidTemplate(t *testing.T) {
 	s := &pr.State{Number: 42, State: "OPEN"}
 	if _, err := Render(s, plain(), "{{.bogus"); err == nil {

@@ -1,10 +1,10 @@
 package pr
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 
-	"github.com/cli/go-gh/v2"
+	"github.com/cli/go-gh/v2/pkg/api"
 )
 
 const query = `query($owner: String!, $repo: String!, $branch: String!) {
@@ -25,15 +25,7 @@ const query = `query($owner: String!, $repo: String!, $branch: String!) {
         commits(last: 1) {
           nodes {
             commit {
-              statusCheckRollup {
-                contexts(first: 100) {
-                  nodes {
-                    __typename
-                    ... on CheckRun { status conclusion }
-                    ... on StatusContext { state }
-                  }
-                }
-              }
+              statusCheckRollup { state }
             }
           }
         }
@@ -45,31 +37,34 @@ const query = `query($owner: String!, $repo: String!, $branch: String!) {
 
 // Fetch returns the PR for the given branch. Returns (nil, nil) when the
 // branch has no associated PR — that is not an error condition for a statusline.
-func Fetch(owner, repo, branch string) (*State, error) {
-	stdout, _, err := gh.Exec(
-		"api", "graphql",
-		"-f", "query="+query,
-		"-f", "owner="+owner,
-		"-f", "repo="+repo,
-		"-f", "branch="+branch,
-	)
+// ctx applies to the HTTP call; pass a deadline to avoid blocking past the
+// caller's tolerance.
+func Fetch(ctx context.Context, owner, repo, branch string) (*State, error) {
+	client, err := api.DefaultGraphQLClient()
 	if err != nil {
-		return nil, fmt.Errorf("gh api graphql: %w", err)
+		return nil, fmt.Errorf("graphql client: %w", err)
 	}
-	return parse(stdout.Bytes())
+	vars := map[string]interface{}{
+		"owner":  owner,
+		"repo":   repo,
+		"branch": branch,
+	}
+	var data gqlData
+	if err := client.DoWithContext(ctx, query, vars, &data); err != nil {
+		return nil, fmt.Errorf("graphql query: %w", err)
+	}
+	return build(&data), nil
 }
 
-type gqlResponse struct {
-	Data struct {
-		Viewer struct {
-			Login string `json:"login"`
-		} `json:"viewer"`
-		Repository struct {
-			PullRequests struct {
-				Nodes []gqlPR `json:"nodes"`
-			} `json:"pullRequests"`
-		} `json:"repository"`
-	} `json:"data"`
+type gqlData struct {
+	Viewer struct {
+		Login string `json:"login"`
+	} `json:"viewer"`
+	Repository struct {
+		PullRequests struct {
+			Nodes []gqlPR `json:"nodes"`
+		} `json:"pullRequests"`
+	} `json:"repository"`
 }
 
 type gqlPR struct {
@@ -92,10 +87,8 @@ type gqlPR struct {
 	Commits struct {
 		Nodes []struct {
 			Commit struct {
-				StatusCheckRollup struct {
-					Contexts struct {
-						Nodes []StatusCheck `json:"nodes"`
-					} `json:"contexts"`
+				StatusCheckRollup *struct {
+					State string `json:"state"`
 				} `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
@@ -107,17 +100,11 @@ type gqlPR struct {
 	} `json:"reviewThreads"`
 }
 
-func parse(raw []byte) (*State, error) {
-	var resp gqlResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("parse graphql response: %w", err)
-	}
-
-	nodes := resp.Data.Repository.PullRequests.Nodes
+func build(data *gqlData) *State {
+	nodes := data.Repository.PullRequests.Nodes
 	if len(nodes) == 0 {
-		s := &State{Viewer: resp.Data.Viewer.Login}
 		// Empty result — Number stays 0, indicating "no PR for this branch".
-		return s, nil
+		return &State{Viewer: data.Viewer.Login}
 	}
 
 	// Prefer OPEN over MERGED if both exist for the same branch.
@@ -140,12 +127,14 @@ func parse(raw []byte) (*State, error) {
 		AutoMerge:      gpr.AutoMergeRequest != nil,
 		Author:         gpr.Author.Login,
 		Labels:         gpr.Labels.Nodes,
-		Viewer:         resp.Data.Viewer.Login,
+		Viewer:         data.Viewer.Login,
 	}
 
-	if len(gpr.Commits.Nodes) > 0 {
-		s.StatusCheckRollup = gpr.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes
+	var rollupState string
+	if len(gpr.Commits.Nodes) > 0 && gpr.Commits.Nodes[0].Commit.StatusCheckRollup != nil {
+		rollupState = gpr.Commits.Nodes[0].Commit.StatusCheckRollup.State
 	}
+	s.CIStatus = mapRollupState(rollupState)
 
 	for _, t := range gpr.ReviewThreads.Nodes {
 		if !t.IsResolved {
@@ -153,48 +142,19 @@ func parse(raw []byte) (*State, error) {
 		}
 	}
 
-	s.CIStatus = rollupStatus(s.StatusCheckRollup)
-
-	return s, nil
+	return s
 }
 
-// rollupStatus aggregates individual check states into "passed", "failed",
-// "pending", or "none".
-func rollupStatus(checks []StatusCheck) string {
-	if len(checks) == 0 {
-		return "none"
-	}
-	var hasRunning, hasFailed, hasSuccess bool
-	for _, c := range checks {
-		if c.Typename == "StatusContext" {
-			switch c.State {
-			case "FAILURE", "ERROR":
-				hasFailed = true
-			case "PENDING":
-				hasRunning = true
-			case "SUCCESS":
-				hasSuccess = true
-			}
-		} else {
-			switch c.Status {
-			case "IN_PROGRESS", "QUEUED":
-				hasRunning = true
-			}
-			switch c.Conclusion {
-			case "FAILURE", "ERROR", "TIMED_OUT", "ACTION_REQUIRED":
-				hasFailed = true
-			case "SUCCESS":
-				hasSuccess = true
-			}
-		}
-	}
-	switch {
-	case hasFailed:
-		return "failed"
-	case hasRunning:
-		return "pending"
-	case hasSuccess:
+// mapRollupState normalizes GitHub's StatusState enum into the four values
+// the rest of the codebase uses.
+func mapRollupState(state string) string {
+	switch state {
+	case "SUCCESS":
 		return "passed"
+	case "FAILURE", "ERROR":
+		return "failed"
+	case "PENDING", "EXPECTED":
+		return "pending"
 	default:
 		return "none"
 	}

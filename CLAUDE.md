@@ -7,8 +7,8 @@ output behavior.
 ## Architecture
 
 - `main.go` — CLI entry point (cobra). Root command + `pr` subcommand share the same handler; bare `gh statusline` runs `pr`.
-- `internal/pr/` — PR state struct and GraphQL fetcher. Uses go-gh's `gh.Exec` to call `gh api graphql`; auth is inherited from `gh`.
-- `internal/render/` — ANSI color helpers, `Mode` (color/hyperlink gating via flags + `NO_COLOR` env var, but **not** TTY detection — statusline consumers capture stdout yet still expect ANSI escapes), template engine, and pre-rendered helpers (`ci`, `midIndicator`, `prLink`, `authorTag`, `labelTags`, `ciGroup`).
+- `internal/pr/` — PR state struct and GraphQL fetcher. Uses go-gh's `pkg/api.GraphQLClient` (direct HTTPS POST, no `gh` fork); auth is inherited from `gh` config. Accepts a `context.Context` so callers can impose a deadline.
+- `internal/render/` — ANSI color helpers, `Mode` (color/hyperlink gating via flags + `NO_COLOR` env var, but **not** TTY detection — statusline consumers capture stdout yet still expect ANSI escapes), template engine, and pre-rendered helpers (`ci`, `mergeIndicator`, `prLink`, `authorTag`, `labelTags`, `ciGroup`).
 - `internal/cache/` — Tiny file-based output cache at `$TMPDIR/gh-statusline/`, keyed by SHA256 of the current working directory.
 
 ## Key design decisions
@@ -21,7 +21,7 @@ output behavior.
 
 ## Dependencies
 
-- `cli/go-gh/v2` — `gh.Exec` for the GraphQL call, `repository.Current()` for owner/repo
+- `cli/go-gh/v2` — `pkg/api.GraphQLClient` for the GraphQL call, `repository.Current()` for owner/repo
 - `spf13/cobra` — CLI structure
 
 Auth is inherited from `gh` automatically.
@@ -35,11 +35,17 @@ copy, `gh statusline` invokes it from this dir, no GitHub fetch:
 go build -o ./gh-statusline . && gh extension install .
 ```
 
-Rebuild after changes:
+**Always reinstall after changes** so `gh statusline` picks up the new
+binary in this and every other worktree:
 
 ```
-go build -o ./gh-statusline .
+go build -o ./gh-statusline . && gh extension install .
 ```
+
+The second `gh extension install .` is a no-op against the existing symlink
+("already an installed extension that provides the 'statusline' command")
+but is safe to run every time — it guarantees the symlink exists when
+working in a fresh clone.
 
 ## Testing
 

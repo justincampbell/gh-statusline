@@ -1,52 +1,39 @@
 package pr
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-func TestRollupStatus(t *testing.T) {
+func TestMapRollupState(t *testing.T) {
 	tests := []struct {
-		name   string
-		checks []StatusCheck
-		want   string
+		state string
+		want  string
 	}{
-		{"no checks", nil, "none"},
-		{"all CheckRun success", []StatusCheck{
-			{Typename: "CheckRun", Status: "COMPLETED", Conclusion: "SUCCESS"},
-			{Typename: "CheckRun", Status: "COMPLETED", Conclusion: "SUCCESS"},
-		}, "passed"},
-		{"CheckRun failure beats success", []StatusCheck{
-			{Typename: "CheckRun", Status: "COMPLETED", Conclusion: "SUCCESS"},
-			{Typename: "CheckRun", Status: "COMPLETED", Conclusion: "FAILURE"},
-		}, "failed"},
-		{"CheckRun in progress is pending", []StatusCheck{
-			{Typename: "CheckRun", Status: "COMPLETED", Conclusion: "SUCCESS"},
-			{Typename: "CheckRun", Status: "IN_PROGRESS"},
-		}, "pending"},
-		{"failed beats pending", []StatusCheck{
-			{Typename: "CheckRun", Status: "IN_PROGRESS"},
-			{Typename: "CheckRun", Status: "COMPLETED", Conclusion: "FAILURE"},
-		}, "failed"},
-		{"StatusContext success", []StatusCheck{
-			{Typename: "StatusContext", State: "SUCCESS"},
-		}, "passed"},
-		{"StatusContext pending", []StatusCheck{
-			{Typename: "StatusContext", State: "PENDING"},
-		}, "pending"},
+		{"SUCCESS", "passed"},
+		{"FAILURE", "failed"},
+		{"ERROR", "failed"},
+		{"PENDING", "pending"},
+		{"EXPECTED", "pending"},
+		{"", "none"},
+		{"WHATEVER", "none"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := rollupStatus(tt.checks); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
+		t.Run(tt.state, func(t *testing.T) {
+			if got := mapRollupState(tt.state); got != tt.want {
+				t.Errorf("mapRollupState(%q) = %q, want %q", tt.state, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestParseEmpty(t *testing.T) {
-	raw := []byte(`{"data":{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[]}}}}`)
-	s, err := parse(raw)
-	if err != nil {
+func TestBuildEmpty(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
+	s := build(&data)
 	if s.Number != 0 {
 		t.Errorf("expected Number=0, got %d", s.Number)
 	}
@@ -55,31 +42,65 @@ func TestParseEmpty(t *testing.T) {
 	}
 }
 
-func TestParsePrefersOpenOverMerged(t *testing.T) {
-	raw := []byte(`{"data":{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+func TestBuildPrefersOpenOverMerged(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
 		{"number":1,"state":"MERGED"},
 		{"number":2,"state":"OPEN"}
-	]}}}}`)
-	s, err := parse(raw)
-	if err != nil {
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
+	s := build(&data)
 	if s.Number != 2 {
 		t.Errorf("expected OPEN PR #2 to win, got %d", s.Number)
 	}
 }
 
-func TestParseUnresolvedCommentsCount(t *testing.T) {
-	raw := []byte(`{"data":{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+func TestBuildUnresolvedCommentsCount(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
 		{"number":42,"state":"OPEN","reviewThreads":{"nodes":[
 			{"isResolved":true},{"isResolved":false},{"isResolved":false}
 		]}}
-	]}}}}`)
-	s, err := parse(raw)
-	if err != nil {
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
+	s := build(&data)
 	if s.UnresolvedComments != 2 {
 		t.Errorf("expected 2 unresolved, got %d", s.UnresolvedComments)
+	}
+}
+
+func TestBuildCIStatusFromRollup(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+		{"number":42,"state":"OPEN","commits":{"nodes":[
+			{"commit":{"statusCheckRollup":{"state":"FAILURE"}}}
+		]}}
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	s := build(&data)
+	if s.CIStatus != "failed" {
+		t.Errorf("expected failed, got %q", s.CIStatus)
+	}
+}
+
+func TestBuildCIStatusNoRollup(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+		{"number":42,"state":"OPEN","commits":{"nodes":[
+			{"commit":{"statusCheckRollup":null}}
+		]}}
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	s := build(&data)
+	if s.CIStatus != "none" {
+		t.Errorf("expected none, got %q", s.CIStatus)
 	}
 }
