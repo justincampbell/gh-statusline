@@ -104,6 +104,10 @@ func runPR(tmpl string, ttl, timeout time.Duration, mode render.Mode) error {
 		return emit(c, cwd, "", ttl)
 	}
 
+	if pr.ShouldSkip(branch, defaultBranch()) {
+		return emit(c, cwd, "", ttl)
+	}
+
 	ctx := context.Background()
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -184,4 +188,14 @@ func currentBranch() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// defaultBranch reads refs/remotes/origin/HEAD. Returns "" if unset or git
+// fails, which callers treat as "unknown, don't skip".
+func defaultBranch() string {
+	out, err := exec.Command("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
 }
