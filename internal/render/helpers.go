@@ -86,6 +86,21 @@ func (m Mode) AuthorTag(author, viewer string) string {
 	return m.magenta(tag)
 }
 
+// RepoStatus renders a dimmed, hyperlinked "owner/repo". A failing CI rollup
+// for the current branch is prepended (no separator); passing/pending/none
+// stays quiet so the prompt only lights up when something actually needs
+// attention.
+func (m Mode) RepoStatus(bs *pr.BranchStatus) string {
+	if bs == nil {
+		return ""
+	}
+	repo := m.hyperlink(m.dim(bs.Owner+"/"+bs.Repo), bs.URL)
+	if bs.CIStatus != "failed" {
+		return repo
+	}
+	return m.CI(bs.CIStatus) + repo
+}
+
 // Labels returns space-joined, hex-colored label tags.
 func (m Mode) Labels(labels []pr.Label) string {
 	if len(labels) == 0 {

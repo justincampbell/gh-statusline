@@ -7,9 +7,24 @@ import (
 	"github.com/cli/go-gh/v2/pkg/api"
 )
 
+// Result bundles the PR for the current branch (zero PR when none exists) and
+// the repo/CI info used as a fallback when there is no PR to show.
+type Result struct {
+	PR     *State
+	Branch *BranchStatus
+}
+
 const query = `query($owner: String!, $repo: String!, $branch: String!) {
   viewer { login }
   repository(owner: $owner, name: $repo) {
+    url
+    ref(qualifiedName: $branch) {
+      target {
+        ... on Commit {
+          statusCheckRollup { state }
+        }
+      }
+    }
     pullRequests(headRefName: $branch, first: 2, states: [OPEN, MERGED], orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
         number
@@ -35,11 +50,11 @@ const query = `query($owner: String!, $repo: String!, $branch: String!) {
   }
 }`
 
-// Fetch returns the PR for the given branch. Returns (nil, nil) when the
-// branch has no associated PR — that is not an error condition for a statusline.
-// ctx applies to the HTTP call; pass a deadline to avoid blocking past the
-// caller's tolerance.
-func Fetch(ctx context.Context, owner, repo, branch string) (*State, error) {
+// Fetch issues a single GraphQL request that returns both the PR for the
+// branch (if any) and the repo's URL plus the branch's CI rollup. ctx applies
+// to the HTTP call; pass a deadline to avoid blocking past the caller's
+// tolerance.
+func Fetch(ctx context.Context, owner, repo, branch string) (*Result, error) {
 	client, err := api.DefaultGraphQLClient()
 	if err != nil {
 		return nil, fmt.Errorf("graphql client: %w", err)
@@ -53,7 +68,7 @@ func Fetch(ctx context.Context, owner, repo, branch string) (*State, error) {
 	if err := client.DoWithContext(ctx, query, vars, &data); err != nil {
 		return nil, fmt.Errorf("graphql query: %w", err)
 	}
-	return build(&data), nil
+	return build(owner, repo, &data), nil
 }
 
 type gqlData struct {
@@ -61,6 +76,14 @@ type gqlData struct {
 		Login string `json:"login"`
 	} `json:"viewer"`
 	Repository struct {
+		URL string `json:"url"`
+		Ref *struct {
+			Target struct {
+				StatusCheckRollup *struct {
+					State string `json:"state"`
+				} `json:"statusCheckRollup"`
+			} `json:"target"`
+		} `json:"ref"`
 		PullRequests struct {
 			Nodes []gqlPR `json:"nodes"`
 		} `json:"pullRequests"`
@@ -100,10 +123,16 @@ type gqlPR struct {
 	} `json:"reviewThreads"`
 }
 
-func build(data *gqlData) *State {
+func build(owner, repo string, data *gqlData) *Result {
+	return &Result{
+		PR:     buildPR(data),
+		Branch: buildBranch(owner, repo, data),
+	}
+}
+
+func buildPR(data *gqlData) *State {
 	nodes := data.Repository.PullRequests.Nodes
 	if len(nodes) == 0 {
-		// Empty result — Number stays 0, indicating "no PR for this branch".
 		return &State{Viewer: data.Viewer.Login}
 	}
 
@@ -143,6 +172,23 @@ func build(data *gqlData) *State {
 	}
 
 	return s
+}
+
+func buildBranch(owner, repo string, data *gqlData) *BranchStatus {
+	bs := &BranchStatus{
+		Owner: owner,
+		Repo:  repo,
+		URL:   data.Repository.URL,
+	}
+	if bs.URL == "" {
+		bs.URL = fmt.Sprintf("https://github.com/%s/%s", owner, repo)
+	}
+	var state string
+	if data.Repository.Ref != nil && data.Repository.Ref.Target.StatusCheckRollup != nil {
+		state = data.Repository.Ref.Target.StatusCheckRollup.State
+	}
+	bs.CIStatus = mapRollupState(state)
+	return bs
 }
 
 // mapRollupState normalizes GitHub's StatusState enum into the four values

@@ -104,10 +104,6 @@ func runPR(tmpl string, ttl, timeout time.Duration, mode render.Mode) error {
 		return emit(c, cwd, "", ttl)
 	}
 
-	if pr.ShouldSkip(branch, defaultBranch()) {
-		return emit(c, cwd, "", ttl)
-	}
-
 	ctx := context.Background()
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -115,7 +111,7 @@ func runPR(tmpl string, ttl, timeout time.Duration, mode render.Mode) error {
 		defer cancel()
 	}
 
-	state, err := pr.Fetch(ctx, repo.Owner, repo.Name, branch)
+	result, err := pr.Fetch(ctx, repo.Owner, repo.Name, branch)
 	if err != nil {
 		// API failure (network, timeout, rate limit) → fall back to last known
 		// good value, even if expired.
@@ -126,11 +122,17 @@ func runPR(tmpl string, ttl, timeout time.Duration, mode render.Mode) error {
 		return emit(c, cwd, "", ttl)
 	}
 
-	output, err := render.Render(state, mode, tmpl)
-	if err != nil {
-		return err
+	// Ignore any PR with head == default branch — merged PRs from main surface
+	// as stale results that aren't useful in the prompt.
+	if !pr.ShouldSkip(branch, defaultBranch()) && result.PR != nil && result.PR.Number > 0 {
+		output, err := render.Render(result.PR, mode, tmpl)
+		if err != nil {
+			return err
+		}
+		return emit(c, cwd, output, ttl)
 	}
-	return emit(c, cwd, output, ttl)
+
+	return emit(c, cwd, mode.RepoStatus(result.Branch), ttl)
 }
 
 func emit(c *cache.Cache, key, output string, ttl time.Duration) error {
@@ -158,10 +160,11 @@ func runFields(timeout time.Duration, mode render.Mode) error {
 		defer cancel()
 	}
 
-	state, err := pr.Fetch(ctx, repo.Owner, repo.Name, branch)
+	result, err := pr.Fetch(ctx, repo.Owner, repo.Name, branch)
 	if err != nil {
 		return fmt.Errorf("fetch PR: %w", err)
 	}
+	state := result.PR
 	if state == nil || state.Number == 0 {
 		fmt.Fprintf(os.Stderr, "no PR for branch %q — showing zero values\n\n", branch)
 	}
@@ -190,12 +193,17 @@ func currentBranch() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// defaultBranch reads refs/remotes/origin/HEAD. Returns "" if unset or git
-// fails, which callers treat as "unknown, don't skip".
+// defaultBranch reads refs/remotes/origin/HEAD, falling back to whichever of
+// main/master exists as a remote ref. Returns "" only if neither lookup
+// succeeds, which callers treat as "unknown, don't skip".
 func defaultBranch() string {
-	out, err := exec.Command("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output()
-	if err != nil {
-		return ""
+	if out, err := exec.Command("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output(); err == nil {
+		return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
 	}
-	return strings.TrimPrefix(strings.TrimSpace(string(out)), "origin/")
+	for _, candidate := range []string{"main", "master"} {
+		if err := exec.Command("git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+candidate).Run(); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }

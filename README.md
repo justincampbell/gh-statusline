@@ -140,6 +140,20 @@ ciGroup           ✓ #42
 When the current branch has no PR, output is a single empty line and the exit
 code is `0` — a statusline must never break the prompt.
 
+When there is no PR for the current branch — on the repo's default branch
+(e.g. `main`), or on a feature branch that hasn't been opened yet — the
+statusline falls back to a dim, hyperlinked `owner/repo`. A failing CI rollup
+is prepended (no separator) so the prompt only lights up when something
+actually needs attention:
+
+```
+$ gh statusline           # default branch / no PR, CI green
+owner/repo
+
+$ gh statusline           # default branch / no PR, CI failing
+✗owner/repo
+```
+
 On a GitHub API failure (network, rate limit, transient error, or hitting
 `--timeout`), the last cached output is reprinted regardless of its age. If no
 cached value exists, output is empty and the exit code is still `0`.

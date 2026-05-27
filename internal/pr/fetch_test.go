@@ -28,17 +28,20 @@ func TestMapRollupState(t *testing.T) {
 }
 
 func TestBuildEmpty(t *testing.T) {
-	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[]}}}`
+	raw := `{"viewer":{"login":"alice"},"repository":{"url":"https://github.com/o/r","pullRequests":{"nodes":[]}}}`
 	var data gqlData
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
-	s := build(&data)
-	if s.Number != 0 {
-		t.Errorf("expected Number=0, got %d", s.Number)
+	r := build("o", "r", &data)
+	if r.PR.Number != 0 {
+		t.Errorf("expected PR.Number=0, got %d", r.PR.Number)
 	}
-	if s.Viewer != "alice" {
-		t.Errorf("expected Viewer=alice, got %q", s.Viewer)
+	if r.PR.Viewer != "alice" {
+		t.Errorf("expected Viewer=alice, got %q", r.PR.Viewer)
+	}
+	if r.Branch.URL != "https://github.com/o/r" {
+		t.Errorf("Branch.URL=%q", r.Branch.URL)
 	}
 }
 
@@ -51,9 +54,9 @@ func TestBuildPrefersOpenOverMerged(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
-	s := build(&data)
-	if s.Number != 2 {
-		t.Errorf("expected OPEN PR #2 to win, got %d", s.Number)
+	r := build("o", "r", &data)
+	if r.PR.Number != 2 {
+		t.Errorf("expected OPEN PR #2 to win, got %d", r.PR.Number)
 	}
 }
 
@@ -67,9 +70,9 @@ func TestBuildUnresolvedCommentsCount(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
-	s := build(&data)
-	if s.UnresolvedComments != 2 {
-		t.Errorf("expected 2 unresolved, got %d", s.UnresolvedComments)
+	r := build("o", "r", &data)
+	if r.PR.UnresolvedComments != 2 {
+		t.Errorf("expected 2 unresolved, got %d", r.PR.UnresolvedComments)
 	}
 }
 
@@ -83,9 +86,9 @@ func TestBuildCIStatusFromRollup(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
-	s := build(&data)
-	if s.CIStatus != "failed" {
-		t.Errorf("expected failed, got %q", s.CIStatus)
+	r := build("o", "r", &data)
+	if r.PR.CIStatus != "failed" {
+		t.Errorf("expected failed, got %q", r.PR.CIStatus)
 	}
 }
 
@@ -99,8 +102,50 @@ func TestBuildCIStatusNoRollup(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		t.Fatal(err)
 	}
-	s := build(&data)
-	if s.CIStatus != "none" {
-		t.Errorf("expected none, got %q", s.CIStatus)
+	r := build("o", "r", &data)
+	if r.PR.CIStatus != "none" {
+		t.Errorf("expected none, got %q", r.PR.CIStatus)
+	}
+}
+
+func TestBuildBranchSuccess(t *testing.T) {
+	raw := `{"repository":{"url":"https://github.com/o/r","ref":{"target":{"statusCheckRollup":{"state":"SUCCESS"}}},"pullRequests":{"nodes":[]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	r := build("o", "r", &data)
+	if r.Branch.CIStatus != "passed" {
+		t.Errorf("Branch.CIStatus=%q, want passed", r.Branch.CIStatus)
+	}
+	if r.Branch.Owner != "o" || r.Branch.Repo != "r" {
+		t.Errorf("owner/repo=%q/%q", r.Branch.Owner, r.Branch.Repo)
+	}
+}
+
+func TestBuildBranchNoRef(t *testing.T) {
+	raw := `{"repository":{"url":"https://github.com/o/r","ref":null,"pullRequests":{"nodes":[]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	r := build("o", "r", &data)
+	if r.Branch.CIStatus != "none" {
+		t.Errorf("Branch.CIStatus=%q, want none", r.Branch.CIStatus)
+	}
+}
+
+func TestBuildBranchURLFallback(t *testing.T) {
+	raw := `{"repository":{"ref":{"target":{"statusCheckRollup":{"state":"FAILURE"}}},"pullRequests":{"nodes":[]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	r := build("o", "r", &data)
+	if r.Branch.URL != "https://github.com/o/r" {
+		t.Errorf("URL fallback=%q", r.Branch.URL)
+	}
+	if r.Branch.CIStatus != "failed" {
+		t.Errorf("Branch.CIStatus=%q, want failed", r.Branch.CIStatus)
 	}
 }

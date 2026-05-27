@@ -161,6 +161,30 @@ func TestFieldsEmptyState(t *testing.T) {
 	}
 }
 
+func TestRepoStatusFailingShowsXNoSpace(t *testing.T) {
+	bs := &pr.BranchStatus{Owner: "o", Repo: "r", URL: "https://github.com/o/r", CIStatus: "failed"}
+	got := plain().RepoStatus(bs)
+	if got != "✗o/r" {
+		t.Errorf("got %q, want %q", got, "✗o/r")
+	}
+}
+
+func TestRepoStatusOmitsPassing(t *testing.T) {
+	for _, status := range []string{"passed", "pending", "none", ""} {
+		bs := &pr.BranchStatus{Owner: "o", Repo: "r", URL: "https://github.com/o/r", CIStatus: status}
+		got := plain().RepoStatus(bs)
+		if got != "o/r" {
+			t.Errorf("CIStatus=%q: got %q, want %q", status, got, "o/r")
+		}
+	}
+}
+
+func TestRepoStatusNil(t *testing.T) {
+	if got := plain().RepoStatus(nil); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
 func TestRenderInvalidTemplate(t *testing.T) {
 	s := &pr.State{Number: 42, State: "OPEN"}
 	if _, err := Render(s, plain(), "{{.bogus"); err == nil {
