@@ -91,7 +91,9 @@ apply colors and OSC 8 hyperlinks the way the default template does.
 | `.isDraft` | `bool` | |
 | `.mergeable` | `string` | `"MERGEABLE"` / `"CONFLICTING"` / `"UNKNOWN"` |
 | `.reviewDecision` | `string` | `"APPROVED"` / `"CHANGES_REQUESTED"` / `"REVIEW_REQUIRED"` |
-| `.autoMerge` | `bool` | |
+| `.autoMerge` | `bool` | Auto-merge requested |
+| `.mergeQueueState` | `string` | `"QUEUED"` / `"AWAITING_CHECKS"` / `"MERGEABLE"` / `"UNMERGEABLE"` / `"LOCKED"` / `""` |
+| `.mergeQueuePosition` | `int` | 1 = next up; 0 when not in queue |
 | `.author` | `string` | `"justin"` |
 | `.labels` | `[]Label` | `[{Name, Color}, …]` |
 | `.unresolvedComments` | `int` | `2` |
@@ -102,7 +104,7 @@ apply colors and OSC 8 hyperlinks the way the default template does.
 | Helper | Output |
 |--------|--------|
 | `.ci` | Colored `✓` / `✗` / `●` / empty |
-| `.mergeIndicator` | Colored `!` (conflict) or `»` (auto-merge) or empty |
+| `.mergeIndicator` | Red `!` (conflict), red `✕` (queue rejected), magenta `»` (next up in merge queue), green `»` (in merge queue), yellow `»` (auto-merge armed), or empty |
 | `.prLink` | `#42` colored by review decision, wrapped in an OSC 8 hyperlink |
 | `.commentIndicator` | Cyan unresolved-comments count, or empty |
 | `.authorTag` | `@author`, magenta when it's not you, dim when it is |

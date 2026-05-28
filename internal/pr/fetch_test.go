@@ -108,6 +108,57 @@ func TestBuildCIStatusNoRollup(t *testing.T) {
 	}
 }
 
+func TestBuildMergeQueueEntry(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+		{"number":42,"state":"OPEN","mergeQueueEntry":{"position":3,"state":"QUEUED"}}
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	r := build("o", "r", &data)
+	if !r.PR.InMergeQueue() {
+		t.Error("expected InMergeQueue=true")
+	}
+	if r.PR.MergeQueueState != "QUEUED" {
+		t.Errorf("MergeQueueState=%q, want QUEUED", r.PR.MergeQueueState)
+	}
+	if r.PR.MergeQueuePosition != 3 {
+		t.Errorf("MergeQueuePosition=%d, want 3", r.PR.MergeQueuePosition)
+	}
+	if r.PR.MergeQueueBroken() {
+		t.Error("expected MergeQueueBroken=false for QUEUED")
+	}
+}
+
+func TestBuildMergeQueueBroken(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+		{"number":42,"state":"OPEN","mergeQueueEntry":{"position":1,"state":"UNMERGEABLE"}}
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	r := build("o", "r", &data)
+	if !r.PR.MergeQueueBroken() {
+		t.Error("expected MergeQueueBroken=true for UNMERGEABLE")
+	}
+}
+
+func TestBuildNoMergeQueueEntry(t *testing.T) {
+	raw := `{"viewer":{"login":"alice"},"repository":{"pullRequests":{"nodes":[
+		{"number":42,"state":"OPEN","mergeQueueEntry":null}
+	]}}}`
+	var data gqlData
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
+		t.Fatal(err)
+	}
+	r := build("o", "r", &data)
+	if r.PR.InMergeQueue() {
+		t.Error("expected InMergeQueue=false when entry is null")
+	}
+}
+
 func TestBuildBranchSuccess(t *testing.T) {
 	raw := `{"repository":{"url":"https://github.com/o/r","ref":{"target":{"statusCheckRollup":{"state":"SUCCESS"}}},"pullRequests":{"nodes":[]}}}`
 	var data gqlData

@@ -21,8 +21,14 @@ func (m Mode) CI(status string) string {
 	}
 }
 
-// MergeIndicator returns a single-character mergeability hint: "!" for a
-// conflict (wins over auto-merge), "»" for auto-merge queued, otherwise "".
+// MergeIndicator returns a single-character mergeability hint:
+//
+//	red "!"     — branch has merge conflicts (wins over everything below)
+//	red "✕"     — merge queue entry is UNMERGEABLE or LOCKED
+//	magenta "»" — at position 1 in the merge queue (next up)
+//	green "»"   — in the merge queue, position > 1
+//	yellow "»"  — auto-merge armed, not yet in the queue
+//	""          — none of the above
 func (m Mode) MergeIndicator(s *pr.State) string {
 	if s == nil {
 		return ""
@@ -30,8 +36,17 @@ func (m Mode) MergeIndicator(s *pr.State) string {
 	if s.Conflicting() {
 		return m.red("!")
 	}
+	if s.MergeQueueBroken() {
+		return m.red("✕")
+	}
+	if s.InMergeQueue() {
+		if s.MergeQueuePosition == 1 {
+			return m.magenta("»")
+		}
+		return m.green("»")
+	}
 	if s.AutoMerge {
-		return m.magenta("»")
+		return m.yellow("»")
 	}
 	return ""
 }

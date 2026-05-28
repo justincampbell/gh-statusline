@@ -70,6 +70,66 @@ func TestRenderAutoMergeIndicator(t *testing.T) {
 	}
 }
 
+func TestMergeIndicatorColors(t *testing.T) {
+	colorMode := Mode{NoHyperlinks: true}
+	const (
+		yellow  = "\033[33m"
+		green   = "\033[32m"
+		magenta = "\033[35m"
+		red     = "\033[31m"
+		reset   = "\033[0m"
+	)
+
+	tests := []struct {
+		name  string
+		state *pr.State
+		want  string
+	}{
+		{
+			name:  "auto-merge armed (not in queue)",
+			state: &pr.State{AutoMerge: true},
+			want:  yellow + "»" + reset,
+		},
+		{
+			name:  "in queue, position > 1",
+			state: &pr.State{AutoMerge: true, MergeQueueState: "QUEUED", MergeQueuePosition: 3},
+			want:  green + "»" + reset,
+		},
+		{
+			name:  "in queue, position 1 = next up",
+			state: &pr.State{AutoMerge: true, MergeQueueState: "AWAITING_CHECKS", MergeQueuePosition: 1},
+			want:  magenta + "»" + reset,
+		},
+		{
+			name:  "queue unmergeable",
+			state: &pr.State{MergeQueueState: "UNMERGEABLE", MergeQueuePosition: 1},
+			want:  red + "✕" + reset,
+		},
+		{
+			name:  "queue locked",
+			state: &pr.State{MergeQueueState: "LOCKED", MergeQueuePosition: 2},
+			want:  red + "✕" + reset,
+		},
+		{
+			name:  "conflict beats everything",
+			state: &pr.State{Mergeable: "CONFLICTING", AutoMerge: true, MergeQueueState: "QUEUED", MergeQueuePosition: 1},
+			want:  red + "!" + reset,
+		},
+		{
+			name:  "nothing armed",
+			state: &pr.State{},
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := colorMode.MergeIndicator(tt.state); got != tt.want {
+				t.Errorf("MergeIndicator = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderCustomTemplate(t *testing.T) {
 	s := &pr.State{Number: 42, State: "OPEN", Author: "alice"}
 	got, err := Render(s, plain(), `{{.author}}/{{.number}}`)
@@ -108,6 +168,8 @@ func TestFieldsPopulated(t *testing.T) {
 		"mergeable":          "MERGEABLE",
 		"reviewDecision":     "APPROVED",
 		"autoMerge":          "true",
+		"mergeQueueState":    "",
+		"mergeQueuePosition": "0",
 		"author":             "alice",
 		"labels":             "[bug p1]",
 		"unresolvedComments": "2",

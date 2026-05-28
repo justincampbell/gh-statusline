@@ -36,6 +36,7 @@ const query = `query($owner: String!, $repo: String!, $branch: String!) {
         reviewDecision
         author { login }
         autoMergeRequest { enabledAt }
+        mergeQueueEntry { position state }
         labels(first: 10) { nodes { name color } }
         commits(last: 1) {
           nodes {
@@ -104,6 +105,10 @@ type gqlPR struct {
 	AutoMergeRequest *struct {
 		EnabledAt string `json:"enabledAt"`
 	} `json:"autoMergeRequest"`
+	MergeQueueEntry *struct {
+		Position int    `json:"position"`
+		State    string `json:"state"`
+	} `json:"mergeQueueEntry"`
 	Labels struct {
 		Nodes []Label `json:"nodes"`
 	} `json:"labels"`
@@ -157,6 +162,11 @@ func buildPR(data *gqlData) *State {
 		Author:         gpr.Author.Login,
 		Labels:         gpr.Labels.Nodes,
 		Viewer:         data.Viewer.Login,
+	}
+
+	if gpr.MergeQueueEntry != nil {
+		s.MergeQueueState = gpr.MergeQueueEntry.State
+		s.MergeQueuePosition = gpr.MergeQueueEntry.Position
 	}
 
 	var rollupState string
